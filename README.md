@@ -7,6 +7,6 @@ To use API:
 2. Add to python project
 3. Import to script using 
 
- ``` import OpenBCIAPI ```
+      ``` import OpenBCIAPI ```
  
  
