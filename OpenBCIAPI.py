@@ -2,16 +2,43 @@
 from cyton import OpenBCICyton
 import serial
 import serial.tools.list_ports as st
+import threading
 
 class OpenBCIAPI:
 
     def __init__(self, num_ch=8, debug=False, daisy=False):
+        """
+        An OpenBCIAPI object can be used to interface between a python script and Cyton board\n
+        :param num_ch: The number of channels being used
+        :param debug: Determines if debug messages are enabled
+        :param daisy: Set to True if Daisy module is being used
+        """
         self.num_ch = num_ch                                        # The number of channels in use
         self.debug = debug                                          # Debug script enabled status
         self.daisy = daisy                                          # Determines if the Daisy is attached
+        if self.daisy:
+            self.sampling_rate = 125                                # Sampling rate at 125 Hz with Daisy Module
+        else:
+            self.sampling_rate = 250                                # Sampling rate at 250 Hz with Daisy Module
         self.baud = 115200                                          # Default baud rate
         self.com_port = None                                        # The COM port for UART
         self.serial = None                                          # Serial connection to board
+        self.sample = None                                          # The data received from the board
+
+    def stream(self):
+        self.serial.write(b'b')                                     # Send begin stream command
+        while True:
+            self.sample = self.serial.readline()
+            print(self.sample)
+
+    # """
+    #   PARSER:
+    #   Parses incoming data packet into OpenBCISample.
+    #   Incoming Packet Structure:
+    #   Start Byte(1)|Sample ID(1)|Channel Data(24)|Aux Data(6)|End Byte(1)
+    #   0xA0|0-255|8, 3-byte signed ints|3 2-byte signed ints|0xC0
+    #
+    # """
 
     def connect(self):
         if self.com_port is None:                                   # If no COM port is specified
@@ -28,7 +55,7 @@ class OpenBCIAPI:
                     self.com_port = p[0]                            # Save the COM port
                     self.serial = s                                 # Save the serial connection
                     if self.debug:
-                        print("OpenBCI port: %s" % self.com_port)
+                        print("OpenBCI port: %s" % self.com_port)   # Show port in debug
                     break                                           # Exit the loop
 
             if self.com_port is None:                               # If no board detected
@@ -44,12 +71,16 @@ class OpenBCIAPI:
 
             if b'OpenBCI' in message:                               # Check if OpenBCI board is detected
                 print('OpenBCI connection established.')            # Notify user if connection established
+                if self.debug:
+                    print("OpenBCI port: %s" % self.com_port)       # Show port in debug
+                while b'$$$' not in message:
+                    message = self.serial.readline()                # Go through rest of restart message
             else:                                                   # If no board detected
                 print('No OpenBCI board detected.')                 # Notify user
                 self.serial.close()                                 # Close loose connection
 
     def disconnect(self):
-        pass
+        self.serial.close()                                         # Close the port connection
 
     def live_plot(self):
         pass
@@ -100,3 +131,4 @@ if __name__ == '__main__':
     print(test.com_port)
     test.connect()
     print(test.com_port)
+    test.stream()
