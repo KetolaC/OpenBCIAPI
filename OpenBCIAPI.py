@@ -24,12 +24,19 @@ class OpenBCIAPI:
         self.com_port = None                                        # The COM port for UART
         self.serial = None                                          # Serial connection to board
         self.sample = None                                          # The data received from the board
+        self.sample_num = None                                      # The number of samples received
 
     def stream(self):
         self.serial.write(b'b')                                     # Send begin stream command
         while True:
-            self.sample = self.serial.readline()
-            print(self.sample)
+            self.serial.flushInput()
+            header = self.serial.read(1)                       # Read the first byte
+            print(header)
+
+            if header == b'\xa0':                              # If the sample is a header
+                self.sample_num = int.from_bytes(
+                    self.serial.read(1), "big", signed=False)       # Get sample number from 2nd byte
+                print(self.sample_num)
 
     # """
     #   PARSER:
