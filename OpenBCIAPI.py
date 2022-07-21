@@ -25,18 +25,24 @@ class OpenBCIAPI:
         self.serial = None                                          # Serial connection to board
         self.sample = None                                          # The data received from the board
         self.sample_num = None                                      # The number of samples received
+        self._streaming = None
 
     def stream(self):
         self.serial.write(b'b')                                     # Send begin stream command
-        while True:
+        self._streaming = True
+        while self._streaming:
             self.serial.flushInput()
-            header = self.serial.read(1)                       # Read the first byte
+            header = self.serial.read(1)                            # Read the first byte
             print(header)
 
-            if header == b'\xa0':                              # If the sample is a header
+            if header == b'\xa0':                                   # If the sample is a header
                 self.sample_num = int.from_bytes(
                     self.serial.read(1), "big", signed=False)       # Get sample number from 2nd byte
                 print(self.sample_num)
+
+    def stop_stream(self):
+        self.serial.write(b's')                                     # Request board to stop streaming
+        self._streaming = False                                     # End streaming loop
 
     # """
     #   PARSER:
