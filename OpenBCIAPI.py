@@ -1,8 +1,11 @@
 # Imports
-from cyton import OpenBCICyton
+# from cyton import OpenBCICyton
 import serial
 import serial.tools.list_ports as st
-import threading
+import time
+from threading import Thread
+import datetime as dt
+
 
 class OpenBCIAPI:
 
@@ -16,6 +19,8 @@ class OpenBCIAPI:
         self.num_ch = num_ch                                        # The number of channels in use
         self.debug = debug                                          # Debug script enabled status
         self.daisy = daisy                                          # Determines if the Daisy is attached
+        # TODO
+        # Activate daisy on a firmware level when needed
         if self.daisy:
             self.sampling_rate = 125                                # Sampling rate at 125 Hz with Daisy Module
         else:
@@ -30,17 +35,46 @@ class OpenBCIAPI:
     def stream(self):
         self.serial.write(b'b')                                     # Send begin stream command
         self._streaming = True
+
+        if self.debug:
+            print("Streaming started.")
+
         while self._streaming:
-            self.serial.flushInput()
-            header = self.serial.read(1)                            # Read the first byte
+
+            # self.serial.flushInput()
+
+            header = self.serial.read(1)    # Read the first byte
+
             print(header)
 
-            if header == b'\xa0':                                   # If the sample is a header
-                self.sample_num = int.from_bytes(
-                    self.serial.read(1), "big", signed=False)       # Get sample number from 2nd byte
-                print(self.sample_num)
+            if header == b'\xa0':
+                line = self.serial.read(32)
+                line = header + line
+                # print(line)
+                # print("Header: {}".format(hex(line[0])))
+                # print("Sample Number: " + str(line[1]))
+                # print("Channel 1: {}".format(line[2:5]))
+                # print("Channel 2: {}".format(line[5:8]))
+                # print("Channel 3: {}".format(line[8:11]))
+                # print("Channel 4: {}".format(line[11:14]))
+                # print("Channel 5: {}".format(line[14:17]))
+                # print("Channel 6: {}".format(line[17:20]))
+                # print("Channel 7: {}".format(line[20:23]))
+                # print("Channel 8: {}".format(line[23:26]))
+                # print("Acc X1: {}".format(hex(line[26])))
+                # print("Acc X0: {}".format(hex(line[27])))
+                # print("Acc Y1: {}".format(hex(line[28])))
+                # print("Acc Y0: {}".format(hex(line[29])))
+                # print("Acc Z1: {}".format(hex(line[30])))
+                # print("Acc Z0: {}".format(hex(line[31])))
+                # print("Footer: {}".format(hex(line[32])))
+                # print(len(line))
+
 
     def stop_stream(self):
+
+        if self.debug:
+            print("Stream stopped.")
         self.serial.write(b's')                                     # Request board to stop streaming
         self._streaming = False                                     # End streaming loop
 
@@ -67,6 +101,8 @@ class OpenBCIAPI:
                     print('OpenBCI connection established.')        # Notify user if connection established
                     self.com_port = p[0]                            # Save the COM port
                     self.serial = s                                 # Save the serial connection
+                    while b'$$$' not in message:
+                        message = self.serial.readline()  # Go through rest of restart message
                     if self.debug:
                         print("OpenBCI port: %s" % self.com_port)   # Show port in debug
                     break                                           # Exit the loop
@@ -101,8 +137,9 @@ class OpenBCIAPI:
     def stop_live_plot(self):
         pass
 
-    def record(self):
-        pass
+    def record(self, filename=None):
+        if filename is None:
+            pass
 
     def stop_record(self):
         pass
@@ -138,7 +175,7 @@ class OpenBCIAPI:
 
 if __name__ == '__main__':
 
-    test = OpenBCIAPI()
+    test = OpenBCIAPI(debug=True)
     print(test.com_port)
     test.set_com_port('COM3')
     print(test.com_port)
