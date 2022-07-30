@@ -1,5 +1,6 @@
 # Imports
 # from cyton import OpenBCICyton
+import os
 import serial
 import serial.tools.list_ports as st
 import time
@@ -26,52 +27,57 @@ class OpenBCIAPI:
         self.baud = 115200                                          # Default baud rate
         self.com_port = None                                        # The COM port for UART
         self.serial = None                                          # Serial connection to board
-        self.eeg_data = [0 for i in range(self.num_ch)]             # Storage for EEG data
-        self.accel_data = [0 for i in range(6)]                     # Storage for accelerometer data
+        self.eeg_data = [0 for _ in range(self.num_ch)]             # Storage for EEG data
+        self.accel_data = [0 for _ in range(6)]                     # Storage for accelerometer data
         self.sample_num = None                                      # The number of samples received
         self._streaming = Event()                                   # Control the streaming thread
-        self._thread_stream = None                                  # Keep track of the stream
-        self._data_ready = False                                    # Determine when a new sample is collected
+        self._thread_stream = Thread(target=self._stream(), args=())
+        self._data_ready = Event()                                  # Determine when a new sample is collected
+        self._recording = False                                     # Keep track of recording status
 
     def _get_sample(self):
 
-        header = self.serial.read(1)                                # Read a single byte
+        header = self.serial.read(1)                                # Read a single byte from buffer
 
-        if header == b'\xa0':
+        if header == b'\xa0':                                       # Wait until header is detected
 
-            self._data_ready = True
+            if self.debug:
+                print("Data package located")                       # Send debug message
 
-            line = self.serial.read(32)
-            line = header + line
+            self._data_ready.set()                                  # Raise data ready flag
 
-            self.sample_num = line[1]
+            line = self.serial.read(32)                             # Retrieve the remainder of the package data
+            line = header + line                                    # Concatenate whole package
 
-            self.eeg_data = [line[2:5], line[5:8], line[8:11], line[11:14],
-                             line[14:17], line[17:20], line[20:23], line[23:26]]        # Save the EEG data
+            self.sample_num = line[1]                               # Save sample number
+
+            self.eeg_data = [line[2:5], line[5:8], line[8:11],
+                             line[11:14], line[14:17], line[17:20],
+                             line[20:23], line[23:26]]              # Save the EEG data
 
             self.accel_data = [line[26], line[27], line[28],
-                               line[29], line[30], line[31]]                            # Save the accelerometer data
+                               line[29], line[30], line[31]]        # Save the accelerometer data
 
-            # if self.debug:
-            #     print(line)
-            #     print("Header: {}".format(hex(line[0])))
-            #     print("Sample Number: " + str(line[1]))
-            #     print("Channel 1: {}".format(line[2:5]))
-            #     print("Channel 2: {}".format(line[5:8]))
-            #     print("Channel 3: {}".format(line[8:11]))
-            #     print("Channel 4: {}".format(line[11:14]))
-            #     print("Channel 5: {}".format(line[14:17]))
-            #     print("Channel 6: {}".format(line[17:20]))
-            #     print("Channel 7: {}".format(line[20:23]))
-            #     print("Channel 8: {}".format(line[23:26]))
-            #     print("Acc X1: {}".format(hex(line[26])))
-            #     print("Acc X0: {}".format(hex(line[27])))
-            #     print("Acc Y1: {}".format(hex(line[28])))
-            #     print("Acc Y0: {}".format(hex(line[29])))
-            #     print("Acc Z1: {}".format(hex(line[30])))
-            #     print("Acc Z0: {}".format(hex(line[31])))
-            #     print("Footer: {}".format(hex(line[32])))
-            #     print(len(line))
+            if self.debug:
+                print(line)
+                # print("Header: {}".format(hex(line[0])))
+                # print("Sample Number: " + str(line[1]))
+                # print("Channel 1: {}".format(line[2:5]))
+                # print("Channel 2: {}".format(line[5:8]))
+                # print("Channel 3: {}".format(line[8:11]))
+                # print("Channel 4: {}".format(line[11:14]))
+                # print("Channel 5: {}".format(line[14:17]))
+                # print("Channel 6: {}".format(line[17:20]))
+                # print("Channel 7: {}".format(line[20:23]))
+                # print("Channel 8: {}".format(line[23:26]))
+                # print("Acc X1: {}".format(hex(line[26])))
+                # print("Acc X0: {}".format(hex(line[27])))
+                # print("Acc Y1: {}".format(hex(line[28])))
+                # print("Acc Y0: {}".format(hex(line[29])))
+                # print("Acc Z1: {}".format(hex(line[30])))
+                # print("Acc Z0: {}".format(hex(line[31])))
+                # print("Footer: {}".format(hex(line[32])))
+                print(len(line))
 
     def _stream(self):
         self.serial.write(b'b')                                     # Send begin stream command
@@ -80,21 +86,20 @@ class OpenBCIAPI:
         if self.debug:
             print("Streaming started.")                             # Debug message
 
-        while not self._streaming.is_set():
-            print(self._streaming.is_set())
-            print("Still sampling")
-            self._get_sample()
+        while not self._streaming.is_set():                         # Repeat loop until stop stream event
+            # print(self._streaming.is_set())
+            # print("Still sampling")
+            self._get_sample()                                      # Call the sampling method
 
         if self.debug:
-            print("Stream terminated internally")
+            print("Stream terminated internally")                   # Debug message when stream stopped
 
     def _stop_stream(self):
 
         if self.debug:
-            print("Stream stopped.")
+            print("Stream stopped.")                                # Debug message for stopping stream
         self.serial.write(b's')                                     # Request board to stop streaming
         self._streaming.set()                                       # End streaming loop
-        print(self._streaming.is_set())
 
     def connect(self):
         if self.com_port is None:                                   # If no COM port is specified
@@ -111,7 +116,7 @@ class OpenBCIAPI:
                     self.com_port = p[0]                            # Save the COM port
                     self.serial = s                                 # Save the serial connection
                     while b'$$$' not in message:
-                        message = self.serial.readline()  # Go through rest of restart message
+                        message = self.serial.readline()            # Go through rest of restart message
                     if self.debug:
                         print("OpenBCI port: %s" % self.com_port)   # Show port in debug
                     break                                           # Exit the loop
@@ -147,8 +152,13 @@ class OpenBCIAPI:
         pass
 
     def record(self, filename=None):
+
         if filename is None:
-            pass
+            filename = os.getcwd() + "\\recording_" + str(dt.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + ".txt"
+            print(filename)
+
+        self._thread_stream.start()
+
 
     def stop_record(self):
         pass
@@ -189,10 +199,12 @@ if __name__ == '__main__':
     test.connect()
     print(test.com_port)
 
-    stream = Thread(target=test._stream, args=())       #.start()
-    stream.start()
-    print("Thread started")
-    time.sleep(10)
-    stop_stream = Thread(target=test._stop_stream, args=())
-    stop_stream.start()
-    print("Second thread started")
+    # stream = Thread(target=test._stream, args=())       #.start()
+    # stream.start()
+    # print("Thread started")
+    # time.sleep(10)
+    # stop_stream = Thread(target=test._stop_stream, args=())
+    # stop_stream.start()
+    # print("Second thread started")
+
+    test.record()
