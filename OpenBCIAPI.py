@@ -31,7 +31,6 @@ class OpenBCIAPI:
         self.accel_data = [0 for _ in range(6)]                     # Storage for accelerometer data
         self.sample_num = None                                      # The number of samples received
         self._streaming = Event()                                   # Control the streaming thread
-        self._thread_stream = Thread(target=self._stream(), args=())
         self._data_ready = Event()                                  # Determine when a new sample is collected
         self._recording = False                                     # Keep track of recording status
 
@@ -60,23 +59,6 @@ class OpenBCIAPI:
 
             if self.debug:
                 print(line)
-                # print("Header: {}".format(hex(line[0])))
-                # print("Sample Number: " + str(line[1]))
-                # print("Channel 1: {}".format(line[2:5]))
-                # print("Channel 2: {}".format(line[5:8]))
-                # print("Channel 3: {}".format(line[8:11]))
-                # print("Channel 4: {}".format(line[11:14]))
-                # print("Channel 5: {}".format(line[14:17]))
-                # print("Channel 6: {}".format(line[17:20]))
-                # print("Channel 7: {}".format(line[20:23]))
-                # print("Channel 8: {}".format(line[23:26]))
-                # print("Acc X1: {}".format(hex(line[26])))
-                # print("Acc X0: {}".format(hex(line[27])))
-                # print("Acc Y1: {}".format(hex(line[28])))
-                # print("Acc Y0: {}".format(hex(line[29])))
-                # print("Acc Z1: {}".format(hex(line[30])))
-                # print("Acc Z0: {}".format(hex(line[31])))
-                # print("Footer: {}".format(hex(line[32])))
                 print(len(line))
 
     def _stream(self):
@@ -87,8 +69,6 @@ class OpenBCIAPI:
             print("Streaming started.")                             # Debug message
 
         while not self._streaming.is_set():                         # Repeat loop until stop stream event
-            # print(self._streaming.is_set())
-            # print("Still sampling")
             self._get_sample()                                      # Call the sampling method
 
         if self.debug:
@@ -123,7 +103,8 @@ class OpenBCIAPI:
 
             if self.com_port is None:                               # If no board detected
                 print('No OpenBCI board detected.')                 # Notify user
-                s.close()                                           # Close loose connection
+                if len(ports) > 0:
+                    s.close()                                       # Close loose connection
 
         else:
             self.serial = serial.Serial(port=self.com_port,
@@ -151,14 +132,25 @@ class OpenBCIAPI:
     def stop_live_plot(self):
         pass
 
+    def _write_sample(self, filepath):
+        while not self._data_ready.is_set():
+            pass                                                    # Wait for data to be ready
+
+        f = open(filepath, 'a')                                     # Append to file
+        f.write(self.sample_num + " ")
+        print(self.sample_num + " ")
+        self._data_ready.clear()
+
     def record(self, filename=None):
 
         if filename is None:
-            filename = os.getcwd() + "\\recording_" + str(dt.datetime.now().strftime("%Y%m%d-%H:%M:%S")) + ".txt"
+            filename = os.getcwd() + "\\recording_" + \
+                       str(dt.datetime.now().strftime(
+                           "%Y%m%d-%H-%M-%S")) + ".txt"             # Name the file according to date and time
             print(filename)
 
-        self._thread_stream.start()
-
+        thread_stream = Thread(target=self._stream(), args=())
+        thread_stream.start()
 
     def stop_record(self):
         pass
@@ -198,13 +190,17 @@ if __name__ == '__main__':
     print(test.com_port)
     test.connect()
     print(test.com_port)
+    cwd = os.getcwd()
+    filename = str(cwd) + 'recording_20220731-01:55:21.txt'
 
-    # stream = Thread(target=test._stream, args=())       #.start()
-    # stream.start()
-    # print("Thread started")
-    # time.sleep(10)
-    # stop_stream = Thread(target=test._stop_stream, args=())
-    # stop_stream.start()
-    # print("Second thread started")
+    stream = Thread(target=test._stream, args=())       #.start()
+    stream.start()
+    print("Thread started")
 
-    test.record()
+    record = Thread(target=test._write_sample(), args=filename)
+    time.sleep(10)
+    stop_stream = Thread(target=test._stop_stream, args=())
+    stop_stream.start()
+    print("Second thread started")
+
+    # test.record()
