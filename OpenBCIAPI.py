@@ -4,7 +4,7 @@ import os
 import serial
 import serial.tools.list_ports as st
 import time
-from threading import Event, Thread
+from threading import Event, Thread, Lock
 import datetime as dt
 
 
@@ -23,7 +23,7 @@ class OpenBCIAPI:
         if self.daisy:
             self.sampling_rate = 125                                # Sampling rate at 125 Hz with Daisy Module
         else:
-            self.sampling_rate = 250                                # Sampling rate at 250 Hz with Daisy Module
+            self.sampling_rate = 256                                # Sampling rate at 250 Hz with Daisy Module
         self.baud = 115200                                          # Default baud rate
         self.com_port = None                                        # The COM port for UART
         self.serial = None                                          # Serial connection to board
@@ -32,43 +32,49 @@ class OpenBCIAPI:
         self.sample_num = None                                      # The number of samples received
         self._streaming = Event()                                   # Control the streaming thread
         self._data_ready = Event()                                  # Determine when a new sample is collected
-        self._recording = False                                     # Keep track of recording status
+        self._recording = Event()                                   # Keep track of recording status
 
     def _get_sample(self):
 
-        header = self.serial.read(1)                                # Read a single byte from buffer
+        if not self._data_ready.is_set():
+            header = self.serial.read(1)                                # Read a single byte from buffer
 
-        if header == b'\xa0':                                       # Wait until header is detected
+            if header == b'\xa0':                                       # Wait until header is detected
 
-            if self.debug:
-                print("Data package located")                       # Send debug message
+                if self.debug:
+                    print("Data package located")                       # Send debug message
 
-            self._data_ready.set()                                  # Raise data ready flag
+                line = self.serial.read(32)                             # Retrieve the remainder of the package data
+                line = header + line                                    # Concatenate whole package
 
-            line = self.serial.read(32)                             # Retrieve the remainder of the package data
-            line = header + line                                    # Concatenate whole package
+                self.sample_num = line[1]                               # Save sample number
 
-            self.sample_num = line[1]                               # Save sample number
+                temp_eeg = [line[2:5], line[5:8], line[8:11],
+                                 line[11:14], line[14:17], line[17:20],
+                                 line[20:23], line[23:26]]              # Save the EEG data
 
-            self.eeg_data = [line[2:5], line[5:8], line[8:11],
-                             line[11:14], line[14:17], line[17:20],
-                             line[20:23], line[23:26]]              # Save the EEG data
+                for i in range(len(temp_eeg)):
+                    temp = ''
+                    for j in temp_eeg[i]:
+                        temp = temp + format(j, '08b')
+                    self.eeg_data[i] = int(temp, 2)
 
-            self.accel_data = [line[26], line[27], line[28],
-                               line[29], line[30], line[31]]        # Save the accelerometer data
+                self.accel_data = [line[26], line[27], line[28],
+                                   line[29], line[30], line[31]]        # Save the accelerometer data
 
-            if self.debug:
-                print(line)
-                print(len(line))
+                self._data_ready.set()                                  # Raise data ready flag
+
+                if self.debug:
+                    print(line)
 
     def _stream(self):
         self.serial.write(b'b')                                     # Send begin stream command
-        self._streaming.clear()                                     # Set streaming condition
+        self._streaming.set()                                       # Set streaming condition
 
         if self.debug:
             print("Streaming started.")                             # Debug message
 
-        while not self._streaming.is_set():                         # Repeat loop until stop stream event
+        while self._streaming.is_set():                             # Repeat loop until stop stream event
             self._get_sample()                                      # Call the sampling method
 
         if self.debug:
@@ -79,7 +85,18 @@ class OpenBCIAPI:
         if self.debug:
             print("Stream stopped.")                                # Debug message for stopping stream
         self.serial.write(b's')                                     # Request board to stop streaming
-        self._streaming.set()                                       # End streaming loop
+        self._streaming.clear()                                       # End streaming loop
+
+    def _write_sample(self, file):
+
+        if self._data_ready.is_set():
+            if self.debug:
+                print("Saving to file")
+            s = str(self.sample_num) + str(self.eeg_data) + str(self.accel_data) + "\n"
+
+            file.write(s)
+
+            self._data_ready.clear()
 
     def connect(self):
         if self.com_port is None:                                   # If no COM port is specified
@@ -102,9 +119,10 @@ class OpenBCIAPI:
                     break                                           # Exit the loop
 
             if self.com_port is None:                               # If no board detected
-                print('No OpenBCI board detected.')                 # Notify user
                 if len(ports) > 0:
                     s.close()                                       # Close loose connection
+                raise ValueError('No OpenBCI board detected.')      # Notify user
+
 
         else:
             self.serial = serial.Serial(port=self.com_port,
@@ -120,8 +138,8 @@ class OpenBCIAPI:
                 while b'$$$' not in message:
                     message = self.serial.readline()                # Go through rest of restart message
             else:                                                   # If no board detected
-                print('No OpenBCI board detected.')                 # Notify user
                 self.serial.close()                                 # Close loose connection
+                raise ValueError('No OpenBCI board detected.')      # Notify user
 
     def disconnect(self):
         self.serial.close()                                         # Close the port connection
@@ -132,28 +150,49 @@ class OpenBCIAPI:
     def stop_live_plot(self):
         pass
 
-    def _write_sample(self, filepath):
-        while not self._data_ready.is_set():
-            pass                                                    # Wait for data to be ready
+    def record(self, filename=None, seconds=10):
 
-        f = open(filepath, 'a')                                     # Append to file
-        f.write(self.sample_num + " ")
-        print(self.sample_num + " ")
-        self._data_ready.clear()
-
-    def record(self, filename=None):
+        if type(seconds) is not int:
+            raise ValueError("Seconds must be given as an integer")
 
         if filename is None:
             filename = os.getcwd() + "\\recording_" + \
                        str(dt.datetime.now().strftime(
                            "%Y%m%d-%H-%M-%S")) + ".txt"             # Name the file according to date and time
-            print(filename)
+            if self.debug:
+                print(filename)
+        f = open(filename, 'a')
 
-        thread_stream = Thread(target=self._stream(), args=())
-        thread_stream.start()
+        self._recording.set()
 
-    def stop_record(self):
-        pass
+        sps = self.sampling_rate
+        i = 0
+
+        if self.daisy:
+            sps = self.sampling_rate*2
+
+        Thread(target=self._stream, args=()).start()
+
+        while not self._streaming.is_set():
+            if self.debug:
+                print("Waiting for streaming to start")
+            time.sleep(0.1)
+
+        while i < sps*seconds:
+            if self._data_ready.is_set():
+                self._write_sample(f)
+                i += 1
+
+        if self.debug:
+            print("Closing file")
+        f.close()
+        self._stop_stream()
+
+        if self.debug:
+            print("Done recording %i seconds of data" % seconds)
+        # while self._recording.is_set():
+        #     self._write_sample(f)
+        # f.close()
 
     def deactivate_channels(self, channels):
         pass
@@ -186,21 +225,10 @@ class OpenBCIAPI:
 
 if __name__ == '__main__':
 
-    test = OpenBCIAPI(debug=True)
-    print(test.com_port)
+    test = OpenBCIAPI(debug=False)
     test.connect()
-    print(test.com_port)
     cwd = os.getcwd()
-    filename = str(cwd) + 'recording_20220731-01:55:21.txt'
+    filename = os.path.join(cwd, 'recording_20220731-01-55-21.txt')
 
-    stream = Thread(target=test._stream, args=())       #.start()
-    stream.start()
-    print("Thread started")
+    test.record(filename, 1)
 
-    record = Thread(target=test._write_sample(), args=filename)
-    time.sleep(10)
-    stop_stream = Thread(target=test._stop_stream, args=())
-    stop_stream.start()
-    print("Second thread started")
-
-    # test.record()
