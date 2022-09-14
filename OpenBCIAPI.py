@@ -218,23 +218,16 @@ class OpenBCIAPI:
 
         space = False
 
-        print("Gonna enter loop")
-
         while not space:
             k = input("Press enter to end the recording session")
             if k is not None:
-                print("Input received")
                 space = True
 
         time.sleep(0.8)
 
-        print("Left loop")
-
         self._stop_stream()
-        print("Stream stopped")
         t.join()
         self._write_sample(f)
-        print("Done writing")
 
         if self.debug:
             print("Closing file")
