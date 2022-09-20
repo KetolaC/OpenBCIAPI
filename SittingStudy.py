@@ -2,13 +2,18 @@ import os
 from OpenBCIAPI import OpenBCIAPI
 
 
-subject_id = "example"
-day = "X"
+subject_id = "example"      # Change this to the user ID
+day = "X"                   # Change this to what day of the study the subject is on
 
 cwd = os.getcwd()
 fs = subject_id + "_Day" + day + "_"
 
 bci = OpenBCIAPI(num_ch=16, debug=False)
+
+## If code errors out, comment everything below this line up to the point where it errored out.
+#  You can comment code by selecting text ad using ctrl + /
+#  You may have to add in the command bci.connect() above the segment if no BCI board is detected.
+
 bci.connect()
 print("Ready to collect test battery data")
 
